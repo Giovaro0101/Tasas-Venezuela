@@ -1,15 +1,37 @@
+import {
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
+import { Newsreader_600SemiBold, Newsreader_700Bold } from '@expo-google-fonts/newsreader';
+import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import { useFonts } from 'expo-font';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  Appearance,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { cargarCache, cargarSeries, cargarTasas, conActual, Series, Tasa } from './src/api';
 import { Anuncio } from './src/Anuncio';
 import { armarTexto, compartirTarjeta } from './src/compartir';
 import { Conversor } from './src/Conversor';
 import { TarjetaResumen } from './src/TarjetaResumen';
-import { acentos, colors, simbolos } from './src/theme';
+import { acentos, colors, fondos, fuentes, simbolos, tinte } from './src/theme';
 
-const SIMBOLOS: Record<Tasa['id'], string> = { usd: '$', eur: '€', usdt: '₮' };
+const ORDEN: Tasa['id'][] = ['usd', 'eur', 'usdt'];
+
+// La app es oscura: así el calendario y el teclado del sistema combinan con ella.
+Appearance.setColorScheme('dark');
+
 const CODIGOS: Record<Tasa['id'], string> = { usd: 'USD', eur: 'EUR', usdt: 'USDT' };
 
 const aDDMMAAAA = (fecha: string) => fecha.split('-').reverse().join('/');
@@ -27,17 +49,37 @@ const fmtDia = (fecha: string) => {
   return txt.charAt(0).toUpperCase() + txt.slice(1);
 };
 
+const hora = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
 export default function App() {
+  const [fuentesListas, errorFuentes] = useFonts({
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Newsreader_600SemiBold,
+    Newsreader_700Bold,
+  });
   const [tasas, setTasas] = useState<Tasa[] | null>(null);
   const [series, setSeries] = useState<Series | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(false);
+  const [actualizadoEn, setActualizadoEn] = useState<Date | null>(null);
   const [sel, setSel] = useState<Tasa['id']>('usd');
   const [pos, setPos] = useState<number | null>(null); // null = último registro
   const [conversion, setConversion] = useState<string | null>(null);
   const [ahora, setAhora] = useState(() => new Date());
   const [compartiendo, setCompartiendo] = useState(false);
   const tarjetaRef = useRef<View>(null);
+
+  // El fondo pasa suavemente de un tinte al otro al cambiar de moneda.
+  const fondoAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(fondoAnim, { toValue: ORDEN.indexOf(sel), duration: 350, useNativeDriver: false }).start();
+  }, [sel, fondoAnim]);
+  const fondo = fondoAnim.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: [fondos.usd, fondos.eur, fondos.usdt],
+  });
 
   const compartir = async () => {
     if (!tasas || compartiendo) return;
@@ -59,6 +101,7 @@ export default function App() {
     const { tasas: nuevas, errores } = await cargarTasas(previas);
     setTasas(nuevas);
     setError(errores > 0);
+    if (errores === 0) setActualizadoEn(new Date());
     setSeries(await cargarSeries());
     setCargando(false);
   }, []);
@@ -81,6 +124,7 @@ export default function App() {
 
   const delta = actual && previo ? actual.valor - previo.valor : null;
   const pct = delta !== null && previo ? (delta / previo.valor) * 100 : null;
+  const colorDelta = delta === null ? colors.muted : delta > 0 ? colors.up : delta < 0 ? colors.down : colors.muted;
 
   const irA = (i: number) => setPos(i >= serie.length - 1 ? null : Math.max(0, i));
 
@@ -108,85 +152,135 @@ export default function App() {
     });
   };
 
+  // Hasta que carguen las fuentes se muestra solo el fondo, para no ver un parpadeo de tipografía.
+  if (!fuentesListas && !errorFuentes) return <View style={s.root} />;
+
+  const estado = cargando
+    ? 'Actualizando…'
+    : error
+      ? 'Sin conexión · datos guardados'
+      : actualizadoEn
+        ? `Actualizado ${hora(actualizadoEn)}`
+        : '';
+  const colorEstado = cargando ? colors.gold : error ? colors.up : colors.down;
+
   return (
-    <View style={s.root}>
+    <Animated.View style={[s.root, { backgroundColor: fondo }]}>
       <StatusBar style="light" />
       <ScrollView
         contentContainerStyle={s.content}
         keyboardShouldPersistTaps="handled"
         refreshControl={
-          <RefreshControl refreshing={cargando && !!tasas} onRefresh={() => refrescar(tasas)} tintColor="#fff" />
+          <RefreshControl
+            refreshing={cargando && !!tasas}
+            onRefresh={() => refrescar(tasas)}
+            colors={[colors.gold]}
+            progressBackgroundColor={colors.card}
+          />
         }
       >
-        <View style={s.tabs}>
-          {tasas?.map((t) => (
-            <Pressable
-              key={t.id}
-              onPress={() => {
-                setSel(t.id);
-                setPos(null);
-              }}
-              style={[s.tab, sel === t.id && { backgroundColor: acentos[t.id] + '26' }]}
-            >
-              <View style={[s.punto, { backgroundColor: acentos[t.id] }, sel !== t.id && { opacity: 0.45 }]} />
-              <Text style={[s.tabTxt, sel === t.id && { color: acentos[t.id] }]}>{CODIGOS[t.id]}</Text>
-            </Pressable>
-          ))}
+        {/* Cabecera */}
+        <View style={s.cabecera}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.marca}>Tasas Venezuela</Text>
+            <View style={s.estadoFila}>
+              <View style={[s.estadoPunto, { backgroundColor: colorEstado }]} />
+              <Text style={s.estado}>{estado}</Text>
+            </View>
+          </View>
+          <Pressable onPress={() => refrescar(tasas)} disabled={cargando} hitSlop={8} style={[s.botonRedondo, cargando && { opacity: 0.5 }]}>
+            <Text style={s.botonRedondoTxt}>↻</Text>
+          </Pressable>
+        </View>
+        <View style={s.filete} />
+
+        {/* Selector */}
+        <View style={s.selector}>
+          {tasas?.map((t) => {
+            const activa = sel === t.id;
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => {
+                  setSel(t.id);
+                  setPos(null);
+                }}
+                style={[s.tab, { borderBottomColor: activa ? acentos[t.id] : 'transparent' }]}
+              >
+                <View style={[s.tabInsignia, { backgroundColor: tinte(acentos[t.id], activa ? '33' : '1A') }]}>
+                  <Text style={[s.tabSimbolo, { color: acentos[t.id] }]}>{simbolos[t.id]}</Text>
+                </View>
+                <Text style={[s.tabTxt, { color: activa ? colors.text : colors.muted }]}>{CODIGOS[t.id]}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
-        {!tasas && <ActivityIndicator color="#fff" style={{ marginTop: 40 }} />}
+        {!tasas && <ActivityIndicator color={colors.gold} style={{ marginTop: 40 }} />}
 
         {tasa && (
           <>
-            <View style={s.hero}>
-              <View style={s.fuenteFila}>
-                <View style={[s.insignia, { backgroundColor: acento + '26' }]}>
+            {/* Cotización */}
+            <View style={s.tarjeta}>
+              <View style={[s.tarjetaFilete, { backgroundColor: acento }]} />
+              <View style={s.tarjetaCabecera}>
+                <View style={[s.insignia, { backgroundColor: tinte(acento, '26') }]}>
                   <Text style={[s.insigniaTxt, { color: acento }]}>{simbolos[sel]}</Text>
                 </View>
-                <Text style={[s.fuente, { flex: 1 }]}>{tasa.nombre} · {tasa.fuente}</Text>
-                <Pressable
-                  onPress={() => refrescar(tasas)}
-                  disabled={cargando}
-                  hitSlop={8}
-                  style={[s.refrescar, cargando && { opacity: 0.6 }]}
-                >
-                  <Text style={[s.refrescarTxt, { color: acento }]}>{cargando ? 'Actualizando…' : '↻ Actualizar'}</Text>
-                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.tarjetaTitulo}>{tasa.nombre}</Text>
+                  <Text style={s.tarjetaSub}>{tasa.fuente}</Text>
+                </View>
               </View>
-              <Text style={s.valor}>{actual ? `Bs. ${fmt(actual.valor)}` : '—'}</Text>
-              {delta !== null && pct !== null && (
-                <Text style={[s.delta, { color: delta > 0 ? colors.up : delta < 0 ? colors.down : colors.muted }]}>
-                  {delta > 0 ? '▲' : delta < 0 ? '▼' : '•'} {delta > 0 ? '+' : ''}
-                  {fmt(delta)} Bs ({pct > 0 ? '+' : ''}
-                  {fmt(pct)}%) vs. día anterior
+
+              <View style={s.valorFila}>
+                <Text style={s.bs}>Bs.</Text>
+                <Text style={s.valor} numberOfLines={1} adjustsFontSizeToFit>
+                  {actual ? fmt(actual.valor) : '—'}
                 </Text>
+              </View>
+
+              {delta !== null && pct !== null && (
+                <View style={s.deltaFila}>
+                  <View style={[s.deltaChip, { backgroundColor: tinte(colorDelta, '26') }]}>
+                    <Text style={[s.deltaTxt, { color: colorDelta }]}>
+                      {delta > 0 ? '▲' : delta < 0 ? '▼' : '•'} {delta > 0 ? '+' : ''}
+                      {fmt(delta)} Bs · {pct > 0 ? '+' : ''}
+                      {fmt(pct)} %
+                    </Text>
+                  </View>
+                  <Text style={s.deltaNota}>vs. día anterior</Text>
+                </View>
               )}
               {sel === 'usdt' && serie.length < 2 && (
                 <Text style={s.nota}>El historial del USDT se va armando cada día que abras la app.</Text>
               )}
             </View>
 
+            {/* Fecha */}
             <View style={s.fecha}>
-              <Pressable onPress={() => irA(idx - 1)} disabled={idx <= 0} hitSlop={10} style={s.flecha}>
+              <Pressable onPress={() => irA(idx - 1)} disabled={idx <= 0} hitSlop={6} style={s.flecha}>
                 <Text style={[s.flechaTxt, idx <= 0 && { opacity: 0.25 }]}>‹</Text>
               </Pressable>
-              <Pressable onPress={abrirCalendario} hitSlop={8} style={s.fechaBtn}>
-                <Text style={s.fechaTxt}>{actual ? fmtDia(actual.fecha) : '—'}</Text>
-                <Text style={[s.fechaIcono, { color: acento }]}>▾</Text>
+              <Pressable onPress={abrirCalendario} hitSlop={4} style={s.fechaBtn}>
+                <Text style={s.fechaTxt} numberOfLines={1} adjustsFontSizeToFit>
+                  {actual ? fmtDia(actual.fecha) : '—'}
+                </Text>
+                <Text style={s.fechaIcono}>▾</Text>
               </Pressable>
-              <Pressable onPress={() => irA(idx + 1)} disabled={esUltimo} hitSlop={10} style={s.flecha}>
+              <Pressable onPress={() => irA(idx + 1)} disabled={esUltimo} hitSlop={6} style={s.flecha}>
                 <Text style={[s.flechaTxt, esUltimo && { opacity: 0.25 }]}>›</Text>
               </Pressable>
             </View>
             {!esUltimo && (
               <Pressable onPress={() => setPos(null)} style={s.hoy}>
-                <Text style={[s.hoyTxt, { color: acento }]}>Volver al último registro</Text>
+                <Text style={s.hoyTxt}>Volver al último registro</Text>
               </Pressable>
             )}
 
             <Conversor
               key={sel}
-              simbolo={SIMBOLOS[sel]}
+              simbolo={simbolos[sel]}
               acento={acento}
               codigo={CODIGOS[sel]}
               tasa={actual?.valor ?? null}
@@ -195,56 +289,101 @@ export default function App() {
             />
 
             <Pressable onPress={compartir} disabled={compartiendo} style={[s.compartir, compartiendo && { opacity: 0.6 }]}>
-              <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir'}</Text>
+              <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir  ↗'}</Text>
             </Pressable>
+
+            <Text style={s.pie}>Datos referenciales del BCV y de Binance P2P. Esta app no es oficial.</Text>
           </>
         )}
-
-        {error && <Text style={s.error}>No se pudo actualizar todo. Desliza para reintentar.</Text>}
       </ScrollView>
       {/* La tarjeta que se convierte en imagen al compartir: montada pero fuera de la pantalla. */}
       <View style={s.fueraDePantalla} pointerEvents="none">
         <TarjetaResumen ref={tarjetaRef} tasas={tasas ?? []} ahora={ahora} conversion={conversion} />
       </View>
       <Anuncio visible={!!tasas} />
-    </View>
+    </Animated.View>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 20, paddingTop: 64, paddingBottom: 48, gap: 16 },
-  tabs: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 16, padding: 4 },
-  tab: { flex: 1, paddingVertical: 10, borderRadius: 12, flexDirection: 'row', gap: 6, alignItems: 'center', justifyContent: 'center' },
-  punto: { width: 8, height: 8, borderRadius: 4 },
-  tabTxt: { color: colors.muted, fontWeight: '600', fontSize: 14 },
-  refrescar: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 12, backgroundColor: colors.chip },
-  refrescarTxt: { fontSize: 13, fontWeight: '600' },
-  fuenteFila: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  insignia: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
-  insigniaTxt: { fontSize: 18, fontWeight: '800' },
-  hero: { paddingVertical: 14, gap: 6 },
-  fuente: { color: colors.muted, fontSize: 14, fontWeight: '600' },
-  valor: { color: colors.text, fontSize: 48, fontWeight: '700', letterSpacing: -1 },
-  delta: { fontSize: 14, fontWeight: '600' },
-  nota: { color: colors.faint, fontSize: 12 },
+  content: { padding: 20, paddingTop: 56, paddingBottom: 40, gap: 16 },
+
+  cabecera: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  marca: { color: colors.text, fontFamily: fuentes.cifraBold, fontSize: 28 },
+  estadoFila: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+  estadoPunto: { width: 7, height: 7, borderRadius: 4 },
+  estado: { color: colors.muted, fontFamily: fuentes.ui, fontSize: 12 },
+  botonRedondo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  botonRedondoTxt: { color: colors.gold, fontSize: 20, lineHeight: 24 },
+  filete: { width: 36, height: 3, borderRadius: 2, backgroundColor: colors.gold, marginTop: -4 },
+
+  selector: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.line },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    marginBottom: -1,
+  },
+  tabInsignia: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  tabSimbolo: { fontFamily: fuentes.uiBold, fontSize: 12 },
+  tabTxt: { fontFamily: fuentes.uiSemi, fontSize: 14, letterSpacing: 0.5 },
+
+  tarjeta: {
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.line,
+    padding: 20,
+    gap: 14,
+    overflow: 'hidden',
+  },
+  tarjetaFilete: { position: 'absolute', top: 0, left: 0, right: 0, height: 3 },
+  tarjetaCabecera: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 },
+  insignia: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  insigniaTxt: { fontFamily: fuentes.cifraBold, fontSize: 20 },
+  tarjetaTitulo: { color: colors.text, fontFamily: fuentes.uiSemi, fontSize: 16 },
+  tarjetaSub: { color: colors.muted, fontFamily: fuentes.ui, fontSize: 12 },
+  valorFila: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
+  bs: { color: colors.faint, fontFamily: fuentes.ui, fontSize: 20 },
+  valor: { color: colors.text, fontFamily: fuentes.cifra, fontSize: 62, lineHeight: 70, flexShrink: 1 },
+  deltaFila: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  deltaChip: { borderRadius: 999, paddingVertical: 5, paddingHorizontal: 11 },
+  deltaTxt: { fontFamily: fuentes.uiSemi, fontSize: 12.5 },
+  deltaNota: { color: colors.faint, fontFamily: fuentes.ui, fontSize: 12 },
+  nota: { color: colors.muted, fontFamily: fuentes.ui, fontSize: 12 },
+
   fecha: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    alignItems: 'stretch',
     backgroundColor: colors.card,
-    borderRadius: 16,
-    paddingHorizontal: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
-  flecha: { paddingHorizontal: 18, paddingVertical: 12 },
-  flechaTxt: { color: colors.text, fontSize: 28, lineHeight: 30 },
-  fechaBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
-  fechaIcono: { fontSize: 14, fontWeight: '700' },
-  fechaTxt: { color: colors.text, fontSize: 15, fontWeight: '600' },
+  flecha: { width: 52, alignItems: 'center', justifyContent: 'center' },
+  flechaTxt: { color: colors.gold, fontFamily: fuentes.ui, fontSize: 26, lineHeight: 30 },
+  fechaBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
+  fechaTxt: { color: colors.text, fontFamily: fuentes.uiSemi, fontSize: 14, flexShrink: 1 },
+  fechaIcono: { color: colors.gold, fontSize: 12 },
   hoy: { alignSelf: 'center', marginTop: -6 },
-  hoyTxt: { color: colors.accent, fontSize: 13, fontWeight: '600' },
-  error: { color: colors.up, textAlign: 'center' },
+  hoyTxt: { color: colors.gold, fontFamily: fuentes.uiSemi, fontSize: 12.5 },
+
+  compartir: { backgroundColor: colors.gold, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  compartirTxt: { color: colors.onGold, fontFamily: fuentes.uiBold, fontSize: 15, letterSpacing: 0.3 },
+  pie: { color: colors.faint, fontFamily: fuentes.ui, fontSize: 11, textAlign: 'center', paddingHorizontal: 12 },
   fueraDePantalla: { position: 'absolute', left: -2000, top: 0, width: 360 },
-  compartir: { backgroundColor: colors.accent, borderRadius: 16, paddingVertical: 14, alignItems: 'center' },
-  compartirTxt: { color: colors.bg, fontSize: 16, fontWeight: '700' },
 });

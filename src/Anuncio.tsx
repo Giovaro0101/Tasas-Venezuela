@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Keyboard, StyleSheet, View } from 'react-native';
-import { colors } from './theme';
 
 /**
  * Único anuncio de la app: un banner discreto fijo al pie.
@@ -69,6 +68,6 @@ export function Anuncio({ visible }: { visible: boolean }) {
 }
 
 const s = StyleSheet.create({
-  caja: { alignItems: 'center', backgroundColor: colors.bg, paddingBottom: 6 },
+  caja: { alignItems: 'center', paddingBottom: 6 },
   oculto: { height: 0, overflow: 'hidden', paddingBottom: 0 },
 });

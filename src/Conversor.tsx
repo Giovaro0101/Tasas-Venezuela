@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors } from './theme';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { colors, fuentes, tinte } from './theme';
 
 type Campo = 'unidad' | 'bs';
 
@@ -59,7 +59,9 @@ export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversi
 
   const fila = (c: Campo, etiqueta: string) => (
     <View style={s.fila}>
-      <Text style={[s.etiqueta, c === 'unidad' && { color: acento }]}>{etiqueta}</Text>
+      <View style={[s.sello, c === 'unidad' ? { backgroundColor: tinte(acento, '26') } : { backgroundColor: colors.cardAlt }]}>
+        <Text style={[s.selloTxt, { color: c === 'unidad' ? acento : colors.muted }]}>{etiqueta}</Text>
+      </View>
       <TextInput
         style={s.input}
         value={valorDe(c)}
@@ -70,31 +72,55 @@ export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversi
         keyboardType="decimal-pad"
         placeholder="0"
         placeholderTextColor={colors.faint}
+        selectionColor={colors.gold}
         selectTextOnFocus
       />
-      <Pressable onPress={() => copiar(c)} hitSlop={8} style={s.copiar}>
-        <Text style={[s.copiarTxt, copiado === c && { color: acento }]}>
-          {copiado === c ? 'Copiado' : 'Copiar'}
-        </Text>
+      <Pressable onPress={() => copiar(c)} hitSlop={8} style={[s.copiar, copiado === c && { borderColor: colors.gold }]}>
+        <Text style={[s.copiarTxt, copiado === c && { color: colors.gold }]}>{copiado === c ? 'Copiado' : 'Copiar'}</Text>
       </Pressable>
     </View>
   );
 
+  // El botón aparece en cuanto se cambia el valor inicial (1 unidad de la moneda).
+  const editado = !(campo === 'unidad' && texto === '1');
+  const reiniciar = () => {
+    Keyboard.dismiss();
+    setCampo('unidad');
+    setTexto('1');
+  };
+
   return (
-    <View style={[s.card, { borderLeftColor: acento }]}>
+    <View style={s.caja}>
+      <View style={s.cabecera}>
+        <Text style={s.titulo}>Conversor</Text>
+        {editado && (
+          <Pressable onPress={reiniciar} hitSlop={8} style={s.reiniciar}>
+            <Text style={s.reiniciarTxt}>↺ Reiniciar</Text>
+          </Pressable>
+        )}
+      </View>
       {fila('unidad', simbolo)}
-      <View style={s.linea} />
       {fila('bs', 'Bs')}
     </View>
   );
 }
 
 const s = StyleSheet.create({
-  card: { backgroundColor: colors.card, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 6, borderLeftWidth: 4 },
-  fila: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  etiqueta: { color: colors.muted, fontSize: 18, fontWeight: '700', width: 34 },
-  input: { flex: 1, color: colors.text, fontSize: 28, fontWeight: '600', padding: 0 },
-  copiar: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, backgroundColor: colors.chip },
-  copiarTxt: { color: colors.muted, fontSize: 12, fontWeight: '600' },
-  linea: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+  caja: { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 14 },
+  cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 28 },
+  titulo: { color: colors.muted, fontFamily: fuentes.uiSemi, fontSize: 12, letterSpacing: 0.8 },
+  reiniciar: {
+    borderWidth: 1,
+    borderColor: colors.gold,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+  },
+  reiniciarTxt: { color: colors.gold, fontFamily: fuentes.uiSemi, fontSize: 12 },
+  fila: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sello: { width: 46, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  selloTxt: { fontFamily: fuentes.uiBold, fontSize: 16 },
+  input: { flex: 1, color: colors.text, fontFamily: fuentes.cifra, fontSize: 30, padding: 0 },
+  copiar: { borderWidth: 1, borderColor: colors.line, borderRadius: 999, paddingVertical: 7, paddingHorizontal: 13 },
+  copiarTxt: { color: colors.muted, fontFamily: fuentes.uiSemi, fontSize: 12 },
 });

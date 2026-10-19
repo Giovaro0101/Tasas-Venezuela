@@ -29,7 +29,11 @@
           "iosAppId": "ca-app-pub-3940256099942544~1458002511"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-font"
     ]
+  },
+  "react-native-google-mobile-ads": {
+    "optimize_initialization": true
   }
 }

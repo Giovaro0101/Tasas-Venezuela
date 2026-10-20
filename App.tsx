@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Animated,
   Appearance,
+  BackHandler,
   Easing,
   Keyboard,
   Platform,
@@ -22,12 +23,21 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { cargarCache, cargarSeries, cargarTasas, conActual, Series, Tasa } from './src/api';
 import { Anuncio } from './src/Anuncio';
-import { armarTexto, compartirTarjeta } from './src/compartir';
+import { armarTexto, compartirTarjeta, compartirTexto } from './src/compartir';
 import { Conversor } from './src/Conversor';
+import {
+  cargarDatosBancarios,
+  DatoBancario,
+  guardarDatosBancarios,
+  textoDato,
+} from './src/datosBancarios';
+import { DatosPago } from './src/DatosPago';
+import { FormularioDato } from './src/FormularioDato';
 import { TarjetaResumen } from './src/TarjetaResumen';
 import { Fondo } from './src/Fondo';
 import { acentos, colors, dorado, fuentes, paletas, simbolos, tinte } from './src/theme';
@@ -80,6 +90,76 @@ export default function App() {
   const [ahora, setAhora] = useState(() => new Date());
   const [compartiendo, setCompartiendo] = useState(false);
   const tarjetaRef = useRef<View>(null);
+
+  // Datos de pago (pago móvil / transferencia): se guardan solo en el teléfono.
+  const [datos, setDatos] = useState<DatoBancario[]>([]);
+  const [seleccion, setSeleccion] = useState<string[]>([]);
+  const [datosCargados, setDatosCargados] = useState(false);
+  const [formulario, setFormulario] = useState<{ visible: boolean; inicial: DatoBancario | null }>({
+    visible: false,
+    inicial: null,
+  });
+  useEffect(() => {
+    cargarDatosBancarios().then(({ datos: d, seleccion: s }) => {
+      setDatos(d);
+      setSeleccion(s);
+      setDatosCargados(true);
+    });
+  }, []);
+  useEffect(() => {
+    // No se guarda antes de terminar de leer, para no borrar lo que ya había.
+    if (datosCargados) guardarDatosBancarios(datos, seleccion);
+  }, [datos, seleccion, datosCargados]);
+
+  // Menú lateral con los datos de pago.
+  const { width: anchoPantalla } = useWindowDimensions();
+  const anchoPanel = Math.min(anchoPantalla * 0.9, 380);
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const menuAnim = useRef(new Animated.Value(0)).current;
+  const abrirMenu = () => {
+    Keyboard.dismiss();
+    setMenuAbierto(true);
+    Animated.timing(menuAnim, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  };
+  const cerrarMenu = () => {
+    Animated.timing(menuAnim, { toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(
+      () => setMenuAbierto(false),
+    );
+  };
+  // El botón atrás de Android cierra el menú en lugar de salir de la app.
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      cerrarMenu();
+      return true;
+    });
+    return () => sub.remove();
+  }, [menuAbierto]);
+
+  const alternarDato = (id: string) =>
+    setSeleccion((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  const guardarDato = (d: DatoBancario) => {
+    const existe = datos.some((x) => x.id === d.id);
+    setDatos(existe ? datos.map((x) => (x.id === d.id ? d : x)) : [...datos, d]);
+    // Un dato nuevo queda marcado para compartirse.
+    if (!existe) setSeleccion((s) => [...s, d.id]);
+    setFormulario({ visible: false, inicial: null });
+  };
+  const eliminarDato = (id: string) => {
+    setDatos((x) => x.filter((d) => d.id !== id));
+    setSeleccion((s) => s.filter((x) => x !== id));
+    setFormulario({ visible: false, inicial: null });
+  };
+  const textosMarcados = () => datos.filter((d) => seleccion.includes(d.id)).map(textoDato);
+  const compartirSoloDatos = async () => {
+    const textos = textosMarcados();
+    if (!textos.length) return;
+    try {
+      await compartirTexto(textos.join('\n\n'));
+    } catch {
+      // Cancelado por el usuario.
+    }
+  };
 
   // Se oculta la pantalla de carga cuando hay tipografías y datos (guardados o recién cargados).
   const pantallaLista = (fuentesListas || !!errorFuentes) && (tasas !== null || !cargando);
@@ -160,7 +240,7 @@ export default function App() {
       const ahoraExacto = new Date();
       setAhora(ahoraExacto); // que la imagen y el texto lleven la misma hora
       await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      await compartirTarjeta(tarjetaRef, armarTexto(sel, actual?.valor ?? null, fechaTasa, ahoraExacto, conversion));
+      await compartirTarjeta(tarjetaRef, armarTexto(sel, actual?.valor ?? null, fechaTasa, ahoraExacto, conversion, textosMarcados()));
     } catch {
       // El usuario canceló o no hay app compatible: no hay nada que mostrar.
     } finally {
@@ -273,6 +353,19 @@ export default function App() {
             style={[s.botonRedondo, { borderColor: paleta.marco, backgroundColor: paleta.tarjetaA }, cargando && { opacity: 0.5 }]}
           >
             <Text style={s.botonRedondoTxt}>↻</Text>
+          </Pressable>
+          <Pressable
+            onPress={abrirMenu}
+            hitSlop={8}
+            accessibilityLabel="Abrir menú"
+            style={[s.botonRedondo, { borderColor: paleta.marco, backgroundColor: paleta.tarjetaA }]}
+          >
+            <View style={s.rayas}>
+              <View style={s.raya} />
+              <View style={s.raya} />
+              <View style={s.raya} />
+            </View>
+            {seleccion.length > 0 && <View style={s.insigniaMenu} />}
           </Pressable>
         </View>
         <View style={s.filete} />
@@ -404,17 +497,68 @@ export default function App() {
                 onConversion={setConversion}
               />
             </View>
+          </Animated.View>
+        )}
 
+        {/* Estos bloques no dependen de la moneda: quedan fijos al cambiar de pestaña. */}
+        {tasa && (
+          <>
             <Pressable onPress={compartir} disabled={compartiendo} style={compartiendo && { opacity: 0.6 }}>
               <LinearGradient colors={dorado} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.compartir}>
-                <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir  ↗'}</Text>
+                <Text style={s.compartirTxt}>
+                  {compartiendo
+                    ? 'Preparando…'
+                    : seleccion.length > 0
+                      ? `Compartir con datos de pago (${seleccion.length})  ↗`
+                      : 'Compartir  ↗'}
+                </Text>
               </LinearGradient>
             </Pressable>
 
             <Text style={s.pie}>Datos referenciales del BCV y de Binance P2P. Esta app no es oficial.</Text>
-          </Animated.View>
+          </>
         )}
       </ScrollView>
+      {/* Menú lateral: se desliza desde la derecha */}
+      <View style={StyleSheet.absoluteFill} pointerEvents={menuAbierto ? 'auto' : 'none'}>
+        <Animated.View style={[s.velo, { opacity: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={cerrarMenu} />
+        </Animated.View>
+        <Animated.View
+          style={[
+            s.panel,
+            {
+              width: anchoPanel,
+              transform: [{ translateX: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [anchoPanel + 8, 0] }) }],
+            },
+          ]}
+        >
+          <View style={s.panelCabecera}>
+            <Text style={s.panelTitulo}>Menú</Text>
+            <Pressable onPress={cerrarMenu} hitSlop={10} style={s.panelCerrar}>
+              <Text style={s.panelCerrarTxt}>✕</Text>
+            </Pressable>
+          </View>
+          <ScrollView contentContainerStyle={s.panelContenido} showsVerticalScrollIndicator={false}>
+            <DatosPago
+              datos={datos}
+              seleccion={seleccion}
+              paleta={paleta}
+              onAlternar={alternarDato}
+              onAgregar={() => setFormulario({ visible: true, inicial: null })}
+              onEditar={(d) => setFormulario({ visible: true, inicial: d })}
+              onCompartirSolo={compartirSoloDatos}
+            />
+          </ScrollView>
+        </Animated.View>
+      </View>
+      <FormularioDato
+        visible={formulario.visible}
+        inicial={formulario.inicial}
+        onGuardar={guardarDato}
+        onEliminar={eliminarDato}
+        onCerrar={() => setFormulario({ visible: false, inicial: null })}
+      />
       {/* La tarjeta que se convierte en imagen al compartir: montada pero fuera de la pantalla. */}
       <View style={s.fueraDePantalla} pointerEvents="none">
         <TarjetaResumen
@@ -450,6 +594,35 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rayas: { gap: 4.5 },
+  raya: { width: 17, height: 2, borderRadius: 1, backgroundColor: colors.gold },
+  insigniaMenu: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.gold,
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  velo: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(3,7,14,0.66)' },
+  panel: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.bg,
+    borderLeftWidth: 1.5,
+    borderLeftColor: colors.line,
+    paddingTop: 52,
+  },
+  panelCabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 14 },
+  panelTitulo: { color: colors.text, fontFamily: fuentes.cifraBold, fontSize: 26 },
+  panelCerrar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center' },
+  panelCerrarTxt: { color: colors.muted, fontSize: 14 },
+  panelContenido: { paddingHorizontal: 16, paddingBottom: 40, gap: 16 },
   botonRedondoTxt: { color: colors.gold, fontSize: 20, lineHeight: 24 },
   filete: { width: 36, height: 3, borderRadius: 2, backgroundColor: colors.gold, marginTop: -4 },
 

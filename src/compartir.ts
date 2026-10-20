@@ -41,12 +41,24 @@ export function armarTexto(
   fechaTasa: string | null,
   ahora: Date,
   conversion: string | null,
+  /** Bloques de texto de los datos de pago que el usuario marcó (puede no haber ninguno). */
+  datosPago: string[] = [],
 ): string {
   const etiqueta = fechaTasa ? `${ETIQUETA_TASA[id]} del ${fechaTasa}` : ETIQUETA_TASA[id];
   const lineas = [`${etiqueta}: ${valor ? `${fmtMonto(valor)} Bs.` : '—'}`, `Fecha: ${fmtFechaHora(ahora)}`];
   if (conversion) lineas.push(`Conversión: ${conversion}`);
+  if (datosPago.length) lineas.push(`Datos de pago:\n\n${datosPago.join('\n\n')}`);
   lineas.push('Consulta más en Tasas Venezuela.', `Descarga la app: ${ENLACE_APP}`);
   return lineas.join('\n\n');
+}
+
+/** Comparte solo texto (por ejemplo, los datos de pago) con el menú nativo. */
+export async function compartirTexto(texto: string): Promise<void> {
+  if (!ShareNativo) {
+    await RNShare.share({ message: texto });
+    return;
+  }
+  await ShareNativo.open({ title: 'Datos de pago', message: texto, failOnCancel: false });
 }
 
 /** Captura la vista como PNG y abre el menú nativo con la imagen y el texto. */

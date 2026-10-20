@@ -19,18 +19,33 @@ export const fmtMonto = (n: number) =>
 export const fmtFechaHora = (d: Date) =>
   `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
-const valorDe = (tasas: Tasa[], id: Tasa['id']) => {
-  const v = tasas.find((t) => t.id === id)?.valor;
-  return v ? `${fmtMonto(v)} Bs.` : '—';
+/**
+ * Enlace de la app en Play Store. Mientras no esté publicada, la página no existe;
+ * al publicarla con el mismo nombre de paquete (app.json → android.package) funciona sin cambios.
+ */
+export const ENLACE_APP = 'https://play.google.com/store/apps/details?id=com.tasasvenezuela.app';
+
+export const ETIQUETA_TASA: Record<Tasa['id'], string> = {
+  usd: 'Dólar BCV',
+  eur: 'Euro BCV',
+  usdt: 'USDT (Binance P2P)',
 };
 
-export function armarTexto(tasas: Tasa[], ahora: Date, conversion: string | null): string {
-  const lineas = [
-    `Dólar BCV: ${valorDe(tasas, 'usd')} | Euro: ${valorDe(tasas, 'eur')} | USDT: ${valorDe(tasas, 'usdt')}`,
-    `Fecha: ${fmtFechaHora(ahora)}`,
-  ];
+/**
+ * Texto para compartir: solo la tasa de la pantalla en la que está el usuario.
+ * `fechaTasa` (dd/mm/aaaa) solo se indica si no es la tasa más reciente.
+ */
+export function armarTexto(
+  id: Tasa['id'],
+  valor: number | null,
+  fechaTasa: string | null,
+  ahora: Date,
+  conversion: string | null,
+): string {
+  const etiqueta = fechaTasa ? `${ETIQUETA_TASA[id]} del ${fechaTasa}` : ETIQUETA_TASA[id];
+  const lineas = [`${etiqueta}: ${valor ? `${fmtMonto(valor)} Bs.` : '—'}`, `Fecha: ${fmtFechaHora(ahora)}`];
   if (conversion) lineas.push(`Conversión: ${conversion}`);
-  lineas.push('Consulta más en Tasas Venezuela.');
+  lineas.push('Consulta más en Tasas Venezuela.', `Descarga la app: ${ENLACE_APP}`);
   return lineas.join('\n\n');
 }
 

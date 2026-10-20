@@ -33,12 +33,32 @@ const mezcla = (a: string, b: string, t: number) => {
   return `#${hex(0)}${hex(1)}${hex(2)}`;
 };
 
-/** Fondo de la pantalla según la moneda: el marino base con un leve tinte de su color. */
-export const fondos = {
-  usd: mezcla(colors.bg, acentos.usd, 0.1),
-  eur: mezcla(colors.bg, acentos.eur, 0.1),
-  usdt: mezcla(colors.bg, acentos.usdt, 0.1),
-} as const;
+type Moneda = keyof typeof acentos;
+
+/**
+ * Colores derivados de cada moneda: el marino base teñido con su color.
+ * El fondo es un degradado (más teñido arriba, casi marino abajo) y los marcos
+ * usan el mismo tono pero más sólido, para que las tarjetas se recorten bien.
+ */
+const crearPaleta = (id: Moneda) => ({
+  fondoArriba: mezcla(colors.bg, acentos[id], 0.22),
+  fondoAbajo: mezcla(colors.bg, acentos[id], 0.05),
+  marco: mezcla(colors.card, acentos[id], 0.55),
+  tarjetaA: mezcla(colors.card, acentos[id], 0.22),
+  tarjetaB: colors.card,
+  campo: mezcla(colors.cardAlt, acentos[id], 0.12),
+});
+
+export type Paleta = ReturnType<typeof crearPaleta>;
+
+export const paletas: Record<Moneda, Paleta> = {
+  usd: crearPaleta('usd'),
+  eur: crearPaleta('eur'),
+  usdt: crearPaleta('usdt'),
+};
+
+/** Degradado dorado del botón principal. */
+export const dorado = ['#E8CB84', '#C79F45'] as const;
 
 export const simbolos = { usd: '$', eur: '€', usdt: '₮' } as const;
 

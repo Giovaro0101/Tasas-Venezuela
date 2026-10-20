@@ -1,7 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { colors, fuentes, tinte } from './theme';
+import { colors, fuentes, Paleta, tinte } from './theme';
 
 type Campo = 'unidad' | 'bs';
 
@@ -14,6 +15,8 @@ type Props = {
   codigo: string;
   /** Color propio de la moneda. */
   acento: string;
+  /** Colores derivados de la moneda: marco y degradado de la tarjeta. */
+  paleta: Paleta;
   /** Bs por unidad en la fecha elegida (null si no hay dato). */
   tasa: number | null;
   /** Fecha (dd/mm/aaaa) de la tasa si no es la más reciente; se añade al texto. */
@@ -25,7 +28,7 @@ type Props = {
 const fmtCant = (n: number) => n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Dos campos enlazados: al editar uno, el otro se calcula con la tasa. */
-export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversion }: Props) {
+export function Conversor({ simbolo, codigo, acento, paleta, tasa, fechaTasa, onConversion }: Props) {
   const [campo, setCampo] = useState<Campo>('unidad');
   const [texto, setTexto] = useState('1');
   const [copiado, setCopiado] = useState<Campo | null>(null);
@@ -59,7 +62,7 @@ export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversi
 
   const fila = (c: Campo, etiqueta: string) => (
     <View style={s.fila}>
-      <View style={[s.sello, c === 'unidad' ? { backgroundColor: tinte(acento, '26') } : { backgroundColor: colors.cardAlt }]}>
+      <View style={[s.sello, c === 'unidad' ? { backgroundColor: tinte(acento, '26') } : { backgroundColor: paleta.campo }]}>
         <Text style={[s.selloTxt, { color: c === 'unidad' ? acento : colors.muted }]}>{etiqueta}</Text>
       </View>
       <TextInput
@@ -90,7 +93,12 @@ export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversi
   };
 
   return (
-    <View style={s.caja}>
+    <LinearGradient
+      colors={[paleta.tarjetaA, paleta.tarjetaB]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[s.caja, { borderColor: paleta.marco }]}
+    >
       <View style={s.cabecera}>
         <Text style={s.titulo}>Conversor</Text>
         {editado && (
@@ -101,12 +109,12 @@ export function Conversor({ simbolo, codigo, acento, tasa, fechaTasa, onConversi
       </View>
       {fila('unidad', simbolo)}
       {fila('bs', 'Bs')}
-    </View>
+    </LinearGradient>
   );
 }
 
 const s = StyleSheet.create({
-  caja: { backgroundColor: colors.card, borderRadius: 16, borderWidth: 1, borderColor: colors.line, padding: 18, gap: 14 },
+  caja: { borderRadius: 16, borderWidth: 1.5, padding: 18, gap: 14, overflow: 'hidden' },
   cabecera: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 28 },
   titulo: { color: colors.muted, fontFamily: fuentes.uiSemi, fontSize: 12, letterSpacing: 0.8 },
   reiniciar: {

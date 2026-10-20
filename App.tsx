@@ -6,12 +6,16 @@ import {
 import { Newsreader_600SemiBold, Newsreader_700Bold } from '@expo-google-fonts/newsreader';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { useFonts } from 'expo-font';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Appearance,
+  Easing,
+  Keyboard,
   Platform,
   Pressable,
   RefreshControl,
@@ -25,14 +29,20 @@ import { Anuncio } from './src/Anuncio';
 import { armarTexto, compartirTarjeta } from './src/compartir';
 import { Conversor } from './src/Conversor';
 import { TarjetaResumen } from './src/TarjetaResumen';
-import { acentos, colors, fondos, fuentes, simbolos, tinte } from './src/theme';
+import { Fondo } from './src/Fondo';
+import { acentos, colors, dorado, fuentes, paletas, simbolos, tinte } from './src/theme';
 
 const ORDEN: Tasa['id'][] = ['usd', 'eur', 'usdt'];
+
+// La pantalla de carga con el logo se mantiene hasta que la app esté lista para mostrarse.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // La app es oscura: así el calendario y el teclado del sistema combinan con ella.
 Appearance.setColorScheme('dark');
 
 const CODIGOS: Record<Tasa['id'], string> = { usd: 'USD', eur: 'EUR', usdt: 'USDT' };
+
+const ETIQUETAS_TAB: Record<Tasa['id'], string> = { usd: 'Dólar BCV', eur: 'Euro', usdt: 'USDT' };
 
 const aDDMMAAAA = (fecha: string) => fecha.split('-').reverse().join('/');
 
@@ -71,14 +81,76 @@ export default function App() {
   const [compartiendo, setCompartiendo] = useState(false);
   const tarjetaRef = useRef<View>(null);
 
-  // El fondo pasa suavemente de un tinte al otro al cambiar de moneda.
-  const fondoAnim = useRef(new Animated.Value(0)).current;
+  // Se oculta la pantalla de carga cuando hay tipografías y datos (guardados o recién cargados).
+  const pantallaLista = (fuentesListas || !!errorFuentes) && (tasas !== null || !cargando);
   useEffect(() => {
-    Animated.timing(fondoAnim, { toValue: ORDEN.indexOf(sel), duration: 350, useNativeDriver: false }).start();
-  }, [sel, fondoAnim]);
-  const fondo = fondoAnim.interpolate({
+    if (pantallaLista) SplashScreen.hide();
+  }, [pantallaLista]);
+  // Por seguridad, nunca se deja la pantalla de carga más de 8 segundos.
+  useEffect(() => {
+    const t = setTimeout(() => SplashScreen.hide(), 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Teclado: Android no redimensiona la pantalla, así que se deja espacio al final del contenido
+  // y se desplaza hasta el conversor para que lo escrito quede visible encima del teclado.
+  const scrollRef = useRef<ScrollView>(null);
+  const [convY, setConvY] = useState<number | null>(null);
+  const [bloqueY, setBloqueY] = useState(0); // el conversor está dentro del bloque animado
+  const [tecladoAlto, setTecladoAlto] = useState(0);
+  useEffect(() => {
+    const a = Keyboard.addListener('keyboardDidShow', (e) => setTecladoAlto(e.endCoordinates.height));
+    const b = Keyboard.addListener('keyboardDidHide', () => setTecladoAlto(0));
+    return () => {
+      a.remove();
+      b.remove();
+    };
+  }, []);
+  useEffect(() => {
+    if (tecladoAlto === 0 || convY === null) return;
+    // Un fotograma después, para que el espacio extra ya esté aplicado.
+    const id = requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: Math.max(0, bloqueY + convY - 70), animated: true }));
+    return () => cancelAnimationFrame(id);
+  }, [tecladoAlto, convY, bloqueY]);
+
+  // Transición al cambiar de moneda: el fondo, el indicador de la pestaña y los colores avanzan
+  // de forma continua (fondoAnim: 0 = USD, 1 = EUR, 2 = USDT) mientras el contenido se desvanece,
+  // cambia en ese momento y vuelve a aparecer con un leve desplazamiento.
+  const fondoAnim = useRef(new Animated.Value(0)).current;
+  const contenidoAnim = useRef(new Animated.Value(1)).current;
+  const cambiando = useRef(false);
+  const cambiarMoneda = (id: Tasa['id']) => {
+    if (id === sel || cambiando.current) return;
+    cambiando.current = true;
+    Animated.timing(fondoAnim, {
+      toValue: ORDEN.indexOf(id),
+      duration: 200,
+      easing: Easing.inOut(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+    Animated.timing(contenidoAnim, { toValue: 0, duration: 160, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(
+      () => {
+        setSel(id);
+        setPos(null);
+        Animated.timing(contenidoAnim, {
+          toValue: 1,
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start(() => {
+          cambiando.current = false;
+        });
+      },
+    );
+  };
+  const [anchoSelector, setAnchoSelector] = useState(0);
+  const colorIndicador = fondoAnim.interpolate({
     inputRange: [0, 1, 2],
-    outputRange: [fondos.usd, fondos.eur, fondos.usdt],
+    outputRange: [acentos.usd, acentos.eur, acentos.usdt],
+  });
+  const xIndicador = fondoAnim.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: [0, anchoSelector / 3, (2 * anchoSelector) / 3],
   });
 
   const compartir = async () => {
@@ -88,7 +160,7 @@ export default function App() {
       const ahoraExacto = new Date();
       setAhora(ahoraExacto); // que la imagen y el texto lleven la misma hora
       await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      await compartirTarjeta(tarjetaRef, armarTexto(tasas, ahoraExacto, conversion));
+      await compartirTarjeta(tarjetaRef, armarTexto(sel, actual?.valor ?? null, fechaTasa, ahoraExacto, conversion));
     } catch {
       // El usuario canceló o no hay app compatible: no hay nada que mostrar.
     } finally {
@@ -115,12 +187,16 @@ export default function App() {
   }, [refrescar]);
 
   const acento = acentos[sel];
+  const paleta = paletas[sel];
   const tasa = tasas?.find((t) => t.id === sel);
   const serie = useMemo(() => conActual(series?.[sel] ?? [], tasa), [series, sel, tasa]);
   const idx = serie.length ? (pos === null ? serie.length - 1 : Math.min(pos, serie.length - 1)) : -1;
   const actual = idx >= 0 ? serie[idx] : null;
   const previo = idx > 0 ? serie[idx - 1] : null;
   const esUltimo = idx === serie.length - 1;
+
+  // Fecha (dd/mm/aaaa) de la tasa mostrada, solo si no es la más reciente.
+  const fechaTasa = !esUltimo && actual ? aDDMMAAAA(actual.fecha) : null;
 
   const delta = actual && previo ? actual.valor - previo.valor : null;
   const pct = delta !== null && previo ? (delta / previo.valor) * 100 : null;
@@ -165,10 +241,12 @@ export default function App() {
   const colorEstado = cargando ? colors.gold : error ? colors.up : colors.down;
 
   return (
-    <Animated.View style={[s.root, { backgroundColor: fondo }]}>
+    <View style={s.root}>
+      <Fondo indice={fondoAnim} />
       <StatusBar style="light" />
       <ScrollView
-        contentContainerStyle={s.content}
+        ref={scrollRef}
+        contentContainerStyle={[s.content, { paddingBottom: 40 + tecladoAlto }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -188,40 +266,71 @@ export default function App() {
               <Text style={s.estado}>{estado}</Text>
             </View>
           </View>
-          <Pressable onPress={() => refrescar(tasas)} disabled={cargando} hitSlop={8} style={[s.botonRedondo, cargando && { opacity: 0.5 }]}>
+          <Pressable
+            onPress={() => refrescar(tasas)}
+            disabled={cargando}
+            hitSlop={8}
+            style={[s.botonRedondo, { borderColor: paleta.marco, backgroundColor: paleta.tarjetaA }, cargando && { opacity: 0.5 }]}
+          >
             <Text style={s.botonRedondoTxt}>↻</Text>
           </Pressable>
         </View>
         <View style={s.filete} />
 
         {/* Selector */}
-        <View style={s.selector}>
+        <View
+          style={[s.selector, { borderBottomColor: paleta.marco }]}
+          onLayout={(e) => setAnchoSelector(e.nativeEvent.layout.width)}
+        >
           {tasas?.map((t) => {
             const activa = sel === t.id;
             return (
-              <Pressable
-                key={t.id}
-                onPress={() => {
-                  setSel(t.id);
-                  setPos(null);
-                }}
-                style={[s.tab, { borderBottomColor: activa ? acentos[t.id] : 'transparent' }]}
-              >
+              <Pressable key={t.id} onPress={() => cambiarMoneda(t.id)} style={s.tab}>
                 <View style={[s.tabInsignia, { backgroundColor: tinte(acentos[t.id], activa ? '33' : '1A') }]}>
                   <Text style={[s.tabSimbolo, { color: acentos[t.id] }]}>{simbolos[t.id]}</Text>
                 </View>
-                <Text style={[s.tabTxt, { color: activa ? colors.text : colors.muted }]}>{CODIGOS[t.id]}</Text>
+                <Text
+                  style={[s.tabTxt, { color: activa ? colors.text : colors.muted }]}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                >
+                  {ETIQUETAS_TAB[t.id]}
+                </Text>
               </Pressable>
             );
           })}
+          {/* Indicador que se desliza de una pestaña a otra */}
+          {tasas && anchoSelector > 0 && (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                s.indicador,
+                { width: anchoSelector / 3, backgroundColor: colorIndicador, transform: [{ translateX: xIndicador }] },
+              ]}
+            />
+          )}
         </View>
 
         {!tasas && <ActivityIndicator color={colors.gold} style={{ marginTop: 40 }} />}
 
         {tasa && (
-          <>
+          <Animated.View
+            onLayout={(e) => setBloqueY(e.nativeEvent.layout.y)}
+            style={[
+              s.bloque,
+              {
+                opacity: contenidoAnim,
+                transform: [{ translateY: contenidoAnim.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }],
+              },
+            ]}
+          >
             {/* Cotización */}
-            <View style={s.tarjeta}>
+            <LinearGradient
+              colors={[paleta.tarjetaA, paleta.tarjetaB]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[s.tarjeta, { borderColor: paleta.marco }]}
+            >
               <View style={[s.tarjetaFilete, { backgroundColor: acento }]} />
               <View style={s.tarjetaCabecera}>
                 <View style={[s.insignia, { backgroundColor: tinte(acento, '26') }]}>
@@ -255,10 +364,15 @@ export default function App() {
               {sel === 'usdt' && serie.length < 2 && (
                 <Text style={s.nota}>El historial del USDT se va armando cada día que abras la app.</Text>
               )}
-            </View>
+            </LinearGradient>
 
             {/* Fecha */}
-            <View style={s.fecha}>
+            <LinearGradient
+              colors={[paleta.tarjetaA, paleta.tarjetaB]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={[s.fecha, { borderColor: paleta.marco }]}
+            >
               <Pressable onPress={() => irA(idx - 1)} disabled={idx <= 0} hitSlop={6} style={s.flecha}>
                 <Text style={[s.flechaTxt, idx <= 0 && { opacity: 0.25 }]}>‹</Text>
               </Pressable>
@@ -271,37 +385,51 @@ export default function App() {
               <Pressable onPress={() => irA(idx + 1)} disabled={esUltimo} hitSlop={6} style={s.flecha}>
                 <Text style={[s.flechaTxt, esUltimo && { opacity: 0.25 }]}>›</Text>
               </Pressable>
-            </View>
+            </LinearGradient>
             {!esUltimo && (
               <Pressable onPress={() => setPos(null)} style={s.hoy}>
                 <Text style={s.hoyTxt}>Volver al último registro</Text>
               </Pressable>
             )}
 
-            <Conversor
-              key={sel}
-              simbolo={simbolos[sel]}
-              acento={acento}
-              codigo={CODIGOS[sel]}
-              tasa={actual?.valor ?? null}
-              fechaTasa={!esUltimo && actual ? aDDMMAAAA(actual.fecha) : null}
-              onConversion={setConversion}
-            />
+            <View onLayout={(e) => setConvY(e.nativeEvent.layout.y)}>
+              <Conversor
+                key={sel}
+                simbolo={simbolos[sel]}
+                acento={acento}
+                paleta={paleta}
+                codigo={CODIGOS[sel]}
+                tasa={actual?.valor ?? null}
+                fechaTasa={fechaTasa}
+                onConversion={setConversion}
+              />
+            </View>
 
-            <Pressable onPress={compartir} disabled={compartiendo} style={[s.compartir, compartiendo && { opacity: 0.6 }]}>
-              <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir  ↗'}</Text>
+            <Pressable onPress={compartir} disabled={compartiendo} style={compartiendo && { opacity: 0.6 }}>
+              <LinearGradient colors={dorado} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.compartir}>
+                <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir  ↗'}</Text>
+              </LinearGradient>
             </Pressable>
 
             <Text style={s.pie}>Datos referenciales del BCV y de Binance P2P. Esta app no es oficial.</Text>
-          </>
+          </Animated.View>
         )}
       </ScrollView>
       {/* La tarjeta que se convierte en imagen al compartir: montada pero fuera de la pantalla. */}
       <View style={s.fueraDePantalla} pointerEvents="none">
-        <TarjetaResumen ref={tarjetaRef} tasas={tasas ?? []} ahora={ahora} conversion={conversion} />
+        <TarjetaResumen
+          ref={tarjetaRef}
+          id={sel}
+          valor={actual?.valor ?? null}
+          fechaTasa={fechaTasa}
+          delta={delta}
+          pct={pct}
+          ahora={ahora}
+          conversion={conversion}
+        />
       </View>
       <Anuncio visible={!!tasas} />
-    </Animated.View>
+    </View>
   );
 }
 
@@ -318,9 +446,7 @@ const s = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.card,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -335,18 +461,16 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    borderBottomWidth: 2,
-    marginBottom: -1,
   },
+  indicador: { position: 'absolute', left: 0, bottom: -1, height: 2.5, borderRadius: 2 },
+  bloque: { gap: 16 },
   tabInsignia: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   tabSimbolo: { fontFamily: fuentes.uiBold, fontSize: 12 },
-  tabTxt: { fontFamily: fuentes.uiSemi, fontSize: 14, letterSpacing: 0.5 },
+  tabTxt: { fontFamily: fuentes.uiSemi, fontSize: 14, flexShrink: 1 },
 
   tarjeta: {
-    backgroundColor: colors.card,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderWidth: 1.5,
     padding: 20,
     gap: 14,
     overflow: 'hidden',
@@ -369,10 +493,9 @@ const s = StyleSheet.create({
   fecha: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: colors.card,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderWidth: 1.5,
+    overflow: 'hidden',
   },
   flecha: { width: 52, alignItems: 'center', justifyContent: 'center' },
   flechaTxt: { color: colors.gold, fontFamily: fuentes.ui, fontSize: 26, lineHeight: 30 },
@@ -382,7 +505,7 @@ const s = StyleSheet.create({
   hoy: { alignSelf: 'center', marginTop: -6 },
   hoyTxt: { color: colors.gold, fontFamily: fuentes.uiSemi, fontSize: 12.5 },
 
-  compartir: { backgroundColor: colors.gold, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
+  compartir: { borderRadius: 14, paddingVertical: 16, alignItems: 'center', overflow: 'hidden' },
   compartirTxt: { color: colors.onGold, fontFamily: fuentes.uiBold, fontSize: 15, letterSpacing: 0.3 },
   pie: { color: colors.faint, fontFamily: fuentes.ui, fontSize: 11, textAlign: 'center', paddingHorizontal: 12 },
   fueraDePantalla: { position: 'absolute', left: -2000, top: 0, width: 360 },

@@ -21,8 +21,8 @@ type Props = {
   tasa: number | null;
   /** Fecha (dd/mm/aaaa) de la tasa si no es la más reciente; se añade al texto. */
   fechaTasa: string | null;
-  /** Avisa de la conversión actual en texto, p. ej. "20 USD = 17.602,40 VES". */
-  onConversion: (texto: string | null) => void;
+  /** Avisa de la conversión actual: el texto ("20 USD = 17.602,40 VES") y el monto en Bs como número. */
+  onConversion: (texto: string | null, montoBs: number | null) => void;
 };
 
 const fmtCant = (n: number) => n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -45,9 +45,10 @@ export function Conversor({ simbolo, codigo, acento, paleta, tasa, fechaTasa, on
     const base = `${fmtCant(unidad)} ${codigo} = ${fmtCant(bs)} VES`;
     return fechaTasa ? `${base} (tasa del ${fechaTasa})` : base;
   })();
+  const montoBs = valido ? (campo === 'unidad' ? monto * (tasa as number) : monto) : null;
   useEffect(() => {
-    onConversion(resumen);
-  }, [resumen, onConversion]);
+    onConversion(resumen, montoBs);
+  }, [resumen, montoBs, onConversion]);
 
   // El campo activo muestra lo que se escribe; el otro, el cálculo.
   const valorDe = (c: Campo) => (c === campo ? texto : calculado(c === 'bs' ? 'bs' : 'unidad'));

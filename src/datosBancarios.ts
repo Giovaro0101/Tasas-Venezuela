@@ -106,15 +106,24 @@ export function resumenDato(d: DatoBancario): string {
   return [etiquetaTipo(d.tipo), d.banco, clave].filter(Boolean).join(' · ');
 }
 
-/** Texto listo para compartir. */
-export function textoDato(d: DatoBancario): string {
+/** Monto para pegar en la app de un banco: coma decimal y sin puntos de miles (17602,40). */
+export const montoParaCopiar = (n: number) => n.toFixed(2).replace('.', ',');
+
+/**
+ * Texto listo para compartir. Cada valor va en su propia línea y sin separadores
+ * (teléfono sin guiones, monto sin puntos de miles) para que sea fácil copiarlo y pegarlo.
+ * `montoBs` se añade solo si se comparte junto con una conversión.
+ */
+export function textoDato(d: DatoBancario, montoBs: number | null = null): string {
   const doc = `${etiquetaDocumento(d.documentoTipo)}: ${d.documentoTipo}-${d.documento}`;
+  const monto = montoBs !== null && montoBs > 0 ? [`Monto (Bs): ${montoParaCopiar(montoBs)}`] : [];
   if (d.tipo === 'pagomovil') {
     return [
       'PAGO MÓVIL',
       `Banco: ${bancoConCodigo(d)}`,
-      `Teléfono: ${formatearTelefono(d.telefono)}`,
+      `Teléfono: ${d.telefono}`,
       doc,
+      ...monto,
       `Titular: ${d.titular}`,
     ].join('\n');
   }
@@ -124,6 +133,7 @@ export function textoDato(d: DatoBancario): string {
     `Cuenta: ${d.cuenta}`,
     `Tipo de cuenta: ${d.tipoCuenta === 'corriente' ? 'Corriente' : 'Ahorro'}`,
     doc,
+    ...monto,
     `Titular: ${d.titular}`,
   ].join('\n');
 }

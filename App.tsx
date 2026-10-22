@@ -38,6 +38,7 @@ import {
 } from './src/datosBancarios';
 import { DatosPago } from './src/DatosPago';
 import { FormularioDato } from './src/FormularioDato';
+import { OpcionesCompartir } from './src/OpcionesCompartir';
 import { TarjetaResumen } from './src/TarjetaResumen';
 import { Fondo } from './src/Fondo';
 import { acentos, colors, dorado, fuentes, paletas, simbolos, tinte } from './src/theme';
@@ -87,6 +88,11 @@ export default function App() {
   const [sel, setSel] = useState<Tasa['id']>('usd');
   const [pos, setPos] = useState<number | null>(null); // null = último registro
   const [conversion, setConversion] = useState<string | null>(null);
+  const [montoBs, setMontoBs] = useState<number | null>(null);
+  const alCambiarConversion = useCallback((texto: string | null, bs: number | null) => {
+    setConversion(texto);
+    setMontoBs(bs);
+  }, []);
   const [ahora, setAhora] = useState(() => new Date());
   const [compartiendo, setCompartiendo] = useState(false);
   const tarjetaRef = useRef<View>(null);
@@ -150,7 +156,8 @@ export default function App() {
     setSeleccion((s) => s.filter((x) => x !== id));
     setFormulario({ visible: false, inicial: null });
   };
-  const textosMarcados = () => datos.filter((d) => seleccion.includes(d.id)).map(textoDato);
+  // Al compartir solo los datos no hay conversión, así que no llevan monto.
+  const textosMarcados = () => datos.filter((d) => seleccion.includes(d.id)).map((d) => textoDato(d));
   const compartirSoloDatos = async () => {
     const textos = textosMarcados();
     if (!textos.length) return;
@@ -233,14 +240,26 @@ export default function App() {
     outputRange: [0, anchoSelector / 3, (2 * anchoSelector) / 3],
   });
 
-  const compartir = async () => {
+  // Hoja que pregunta si se quieren añadir datos de pago al compartir la tasa.
+  const [opcionesVisibles, setOpcionesVisibles] = useState(false);
+  // Sin datos guardados no hay nada que preguntar: se comparte la tasa directamente.
+  const alPulsarCompartir = () => (datos.length === 0 ? compartir([]) : setOpcionesVisibles(true));
+  const compartirDesdeHoja = (ids: string[]) => {
+    setOpcionesVisibles(false);
+    // Un instante para que la hoja termine de cerrarse antes de abrir el menú del sistema.
+    setTimeout(() => compartir(ids), 260);
+  };
+
+  const compartir = async (ids: string[] = []) => {
     if (!tasas || compartiendo) return;
     setCompartiendo(true);
     try {
       const ahoraExacto = new Date();
       setAhora(ahoraExacto); // que la imagen y el texto lleven la misma hora
       await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-      await compartirTarjeta(tarjetaRef, armarTexto(sel, actual?.valor ?? null, fechaTasa, ahoraExacto, conversion, textosMarcados()));
+      // Con la tasa se añade el monto de la conversión, listo para copiar.
+      const textosDatos = datos.filter((d) => ids.includes(d.id)).map((d) => textoDato(d, montoBs));
+      await compartirTarjeta(tarjetaRef, armarTexto(sel, actual?.valor ?? null, fechaTasa, ahoraExacto, conversion, textosDatos));
     } catch {
       // El usuario canceló o no hay app compatible: no hay nada que mostrar.
     } finally {
@@ -365,7 +384,6 @@ export default function App() {
               <View style={s.raya} />
               <View style={s.raya} />
             </View>
-            {seleccion.length > 0 && <View style={s.insigniaMenu} />}
           </Pressable>
         </View>
         <View style={s.filete} />
@@ -494,7 +512,7 @@ export default function App() {
                 codigo={CODIGOS[sel]}
                 tasa={actual?.valor ?? null}
                 fechaTasa={fechaTasa}
-                onConversion={setConversion}
+                onConversion={alCambiarConversion}
               />
             </View>
           </Animated.View>
@@ -503,15 +521,9 @@ export default function App() {
         {/* Estos bloques no dependen de la moneda: quedan fijos al cambiar de pestaña. */}
         {tasa && (
           <>
-            <Pressable onPress={compartir} disabled={compartiendo} style={compartiendo && { opacity: 0.6 }}>
+            <Pressable onPress={alPulsarCompartir} disabled={compartiendo} style={compartiendo && { opacity: 0.6 }}>
               <LinearGradient colors={dorado} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.compartir}>
-                <Text style={s.compartirTxt}>
-                  {compartiendo
-                    ? 'Preparando…'
-                    : seleccion.length > 0
-                      ? `Compartir con datos de pago (${seleccion.length})  ↗`
-                      : 'Compartir  ↗'}
-                </Text>
+                <Text style={s.compartirTxt}>{compartiendo ? 'Preparando…' : 'Compartir  ↗'}</Text>
               </LinearGradient>
             </Pressable>
 
@@ -519,6 +531,14 @@ export default function App() {
           </>
         )}
       </ScrollView>
+      <OpcionesCompartir
+        visible={opcionesVisibles}
+        datos={datos}
+        preseleccion={seleccion}
+        onCerrar={() => setOpcionesVisibles(false)}
+        onSoloTasa={() => compartirDesdeHoja([])}
+        onConDatos={compartirDesdeHoja}
+      />
       {/* Menú lateral: se desliza desde la derecha */}
       <View style={StyleSheet.absoluteFill} pointerEvents={menuAbierto ? 'auto' : 'none'}>
         <Animated.View style={[s.velo, { opacity: menuAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }) }]}>
@@ -596,17 +616,6 @@ const s = StyleSheet.create({
   },
   rayas: { gap: 4.5 },
   raya: { width: 17, height: 2, borderRadius: 1, backgroundColor: colors.gold },
-  insigniaMenu: {
-    position: 'absolute',
-    top: 7,
-    right: 7,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.gold,
-    borderWidth: 1.5,
-    borderColor: colors.bg,
-  },
   velo: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(3,7,14,0.66)' },
   panel: {
     position: 'absolute',
